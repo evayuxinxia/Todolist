@@ -1,0 +1,294 @@
+<template>
+  <div class="ai-input">
+    <el-card>
+      <template #header>
+        <div class="card-header">
+          <span>AI 智能录入</span>
+        </div>
+      </template>
+
+      <div class="input-section">
+        <el-input
+          v-model="inputText"
+          type="textarea"
+          :rows="6"
+          placeholder="输入任务描述，AI 将自动解析任务内容、截止时间、优先级和工作量&#10;例如：下周三之前完成需求文档，这个工作比较复杂，尽快做完"
+          :disabled="taskStore.loading"
+        />
+      </div>
+
+      <div class="action-bar">
+        <el-button
+          type="primary"
+          :loading="taskStore.loading"
+          @click="handleParse"
+        >
+          <el-icon><MagicStick /></el-icon>
+          AI 解析
+        </el-button>
+        <el-button @click="inputText = ''">清空</el-button>
+      </div>
+
+      <el-divider />
+
+      <div class="voice-section">
+        <el-button
+          :type="recording ? 'danger' : 'success'"
+          :loading="recording && !speaking"
+          :disabled="!speechSupported"
+          @click="toggleRecording"
+        >
+          <el-icon><Microphone v-if="!recording" /><VideoPause v-else /></el-icon>
+          {{ recording ? (speaking ? '正在聆听...' : '停止录音') : '开始录音' }}
+        </el-button>
+        <span class="voice-hint">
+          <template v-if="!speechSupported">
+            当前 WebView 不支持语音识别，请使用文字录入
+          </template>
+          <template v-else-if="recording && interimText">
+            识别中: {{ interimText }}
+          </template>
+          <template v-else>
+            语音转文字录入（支持中文/英文）
+          </template>
+        </span>
+      </div>
+    </el-card>
+
+    <el-dialog
+      v-model="showResult"
+      title="解析结果"
+      width="600px"
+    >
+      <div v-if="parsedTasks.length > 0" class="result-list">
+        <div
+          v-for="(task, index) in parsedTasks"
+          :key="index"
+          class="result-item"
+        >
+          <div class="result-header">
+            <strong>任务 {{ index + 1 }}</strong>
+          </div>
+          <div class="result-content">
+            <p><strong>内容：</strong>{{ task.content }}</p>
+            <p><strong>截止：</strong>{{ task.deadline || '未设置' }}</p>
+            <p><strong>优先级：</strong>{{ task.priority }}</p>
+            <p><strong>工作量：</strong>{{ task.workload }}</p>
+            <p v-if="task.remark"><strong>备注：</strong>{{ task.remark }}</p>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="showResult = false">关闭</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onUnmounted, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { MagicStick, Microphone, VideoPause } from '@element-plus/icons-vue'
+import { useTaskStore } from '@/stores/task'
+
+const taskStore = useTaskStore()
+const inputText = ref('')
+const recording = ref(false)
+const speaking = ref(false)
+const interimText = ref('')
+const showResult = ref(false)
+const parsedTasks = ref<any[]>([])
+const speechSupported = ref(true)
+
+let recognition: any = null
+
+interface SpeechRecognitionEvent {
+  results: any[]
+  resultIndex: number
+}
+
+interface SpeechRecognitionErrorEvent {
+  error: string
+  message: string
+}
+
+onMounted(() => {
+  const SpeechRecognitionCtor =
+    (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+  if (!SpeechRecognitionCtor) {
+    speechSupported.value = false
+    return
+  }
+
+  recognition = new SpeechRecognitionCtor()
+  recognition.lang = 'zh-CN'
+  recognition.continuous = true
+  recognition.interimResults = true
+  recognition.maxAlternatives = 1
+
+  recognition.onstart = () => {
+    speaking.value = true
+  }
+
+  recognition.onresult = (event: SpeechRecognitionEvent) => {
+    let interim = ''
+    let final = ''
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results[i]
+      const transcript = result[0].transcript
+      if (result.isFinal) {
+        final += transcript
+      } else {
+        interim += transcript
+      }
+    }
+    if (final) {
+      inputText.value = (inputText.value ? inputText.value + ' ' : '') + final.trim()
+      interimText.value = ''
+    } else {
+      interimText.value = interim
+    }
+  }
+
+  recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+    console.error('语音识别错误:', event.error)
+    let msg = '语音识别失败'
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      msg = '请允许使用麦克风权限'
+    } else if (event.error === 'no-speech') {
+      msg = '未检测到语音，请重试'
+    } else if (event.error === 'network') {
+      msg = '网络错误，语音识别需要联网'
+    }
+    ElMessage.error(msg)
+    speaking.value = false
+    recording.value = false
+  }
+
+  recognition.onend = () => {
+    speaking.value = false
+    if (recording.value) {
+      try {
+        recognition?.start()
+      } catch (e) {
+        recording.value = false
+      }
+    }
+  }
+})
+
+onUnmounted(() => {
+  if (recognition && recording.value) {
+    try {
+      recognition.stop()
+    } catch (e) {
+      // ignore
+    }
+  }
+})
+
+async function handleParse() {
+  if (!inputText.value.trim()) {
+    ElMessage.warning('请输入任务描述')
+    return
+  }
+
+  try {
+    const result = await taskStore.parseAiTask(inputText.value)
+    parsedTasks.value = result
+    showResult.value = true
+    inputText.value = ''
+    ElMessage.success(`成功创建 ${result.length} 个任务`)
+  } catch (error: any) {
+    ElMessage.error('AI 解析失败: ' + error)
+  }
+}
+
+function toggleRecording() {
+  if (!recognition) {
+    ElMessage.error('当前环境不支持语音识别')
+    return
+  }
+
+  if (recording.value) {
+    try {
+      recognition.stop()
+    } catch (e) {
+      // ignore
+    }
+    recording.value = false
+    speaking.value = false
+    interimText.value = ''
+    ElMessage.success('录音已停止')
+  } else {
+    try {
+      recognition.start()
+      recording.value = true
+      ElMessage.info('开始录音，请说话...')
+    } catch (e: any) {
+      ElMessage.error('启动录音失败: ' + (e?.message || e))
+    }
+  }
+}
+</script>
+
+<style scoped lang="scss">
+.ai-input {
+  max-width: 800px;
+  margin: 0 auto;
+
+  .card-header {
+    font-weight: 600;
+  }
+
+  .input-section {
+    margin-bottom: 20px;
+  }
+
+  .action-bar {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+  }
+
+  .voice-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    .voice-hint {
+      font-size: 13px;
+      color: var(--el-text-color-secondary);
+    }
+  }
+
+  .result-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+
+    .result-item {
+      padding: 16px;
+      background: var(--el-fill-color-light);
+      border-radius: 8px;
+
+      .result-header {
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--el-border-color);
+      }
+
+      .result-content {
+        p {
+          margin: 8px 0;
+          font-size: 14px;
+
+          strong {
+            color: var(--el-text-color-secondary);
+          }
+        }
+      }
+    }
+  }
+}
+</style>
