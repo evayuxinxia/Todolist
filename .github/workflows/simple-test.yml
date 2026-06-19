@@ -21,7 +21,7 @@ jobs:
         id: npm-install
 
       - name: Check npm install result
-        run: echo "npm install exit code: $LASTEXITCODE"
+        run: echo "npm install exit code: %ERRORLEVEL%"
 
       - name: Build frontend
         run: npm run build
@@ -40,4 +40,4 @@ jobs:
         id: cargo-check
 
       - name: Check cargo check result
-        run: echo "cargo check exit code: $LASTEXITCODE"
+        run: echo "cargo check exit code: %ERRORLEVEL%"

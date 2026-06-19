@@ -28,7 +28,7 @@ jobs:
         continue-on-error: true
 
       - name: Check npm install status
-        run: echo "npm install exit code: $LASTEXITCODE"
+        run: echo "npm install exit code: %ERRORLEVEL%"
 
       - name: Show npm version
         run: npm --version
