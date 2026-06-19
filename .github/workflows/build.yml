@@ -19,16 +19,19 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 20.x
           cache: 'npm'
 
       - name: Install npm dependencies
-        run: npm ci
-        timeout-minutes: 10
+        run: npm install
+        timeout-minutes: 15
+
+      - name: Show npm version
+        run: npm --version
 
       - name: Build frontend
         run: npm run build
-        timeout-minutes: 10
+        timeout-minutes: 15
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -41,27 +44,26 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Install Tauri CLI
-        run: npm install -g @tauri-apps/cli
-        timeout-minutes: 5
-
-      - name: Show environment info
+      - name: Show Rust version
         run: |
-          node --version
-          npm --version
           rustc --version
           cargo --version
-          tauri --version
+
+      - name: Install Tauri CLI
+        run: npm install -g @tauri-apps/cli@latest
+        timeout-minutes: 10
+
+      - name: Show Tauri version
+        run: tauri --version
 
       - name: Build Tauri app
         run: npx tauri build --skip-signing --verbose
         env:
           CI: true
-          TAURI_FS_ALLOWLIST: '["all"]'
-        timeout-minutes: 30
+        timeout-minutes: 45
 
       - name: List build artifacts
-        run: dir /s "src-tauri/target/release/bundle"
+        run: Get-ChildItem -Path "src-tauri/target/release/bundle" -Recurse
         continue-on-error: true
 
       - name: Upload artifact
