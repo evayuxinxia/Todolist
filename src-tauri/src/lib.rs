@@ -6,13 +6,11 @@ use tokio::sync::RwLock;
 mod db;
 mod ai_client;
 mod scheduler;
-mod tray;
 mod commands;
 mod models;
 
 use db::Database;
 use scheduler::Scheduler;
-use tray::TrayManager;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -22,10 +20,19 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let tray_menu = SystemTrayMenu::new()
+        .add_item(CustomMenuItem::new("show".to_string(), "打开主窗口"))
+        .add_item(CustomMenuItem::new("hide".to_string(), "隐藏窗口"))
+        .add_native_item(tauri::SystemTrayMenuItem::Separator)
+        .add_item(CustomMenuItem::new("quit".to_string(), "退出"));
+
+    let tray = SystemTray::new().with_menu(tray_menu);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .system_tray(tray)
         .setup(|app| {
-            let db = Database::new("todo.db")?;
+            let db = Database::new()?;
 
             let db_clone = db.clone();
             tauri::async_runtime::spawn(async move {
@@ -42,21 +49,19 @@ pub fn run() {
 
             app.manage(state);
 
-            let tray_manager = TrayManager::new(app_handle.clone());
-            tray_manager.create_tray()?;
-
             let scheduler_handle = state.scheduler.clone();
             tauri::async_runtime::spawn(async move {
                 let mut scheduler = scheduler_handle.write().await;
                 scheduler.start().await;
             });
 
-            let window = app.get_webview_window("main").unwrap();
-            window.on_window_event(|event| {
-                if let tauri::WindowEvent::CloseRequested { .. } = event {
-                    window.hide().unwrap();
-                }
-            });
+            if let Some(window) = app.get_webview_window("main") {
+                window.on_window_event(|event| {
+                    if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        let _ = window.hide();
+                    }
+                });
+            }
 
             Ok(())
         })

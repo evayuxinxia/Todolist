@@ -10,7 +10,7 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn new(db_path: &str) -> Result<Self> {
+    pub fn new() -> Result<Self> {
         Ok(Self { pool: Arc::new(Mutex::new(None)) })
     }
 
